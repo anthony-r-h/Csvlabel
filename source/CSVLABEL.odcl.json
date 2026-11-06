@@ -1,0 +1,310 @@
+{
+  "format": 1,
+  "name": "CSVLabels",
+  "forms": [
+    {
+      "name": "Palette",
+      "type": "palette",
+      "caption": "CSV Labels",
+      "width": 344,
+      "height": 760,
+      "controls": [
+        {
+          "type": "Label",
+          "name": "Header",
+          "left": 12,
+          "top": 10,
+          "width": 290,
+          "height": 17,
+          "caption": "CSV-linked drawing annotations"
+        },
+        {
+          "type": "Label",
+          "name": "Status",
+          "left": 12,
+          "top": 34,
+          "width": 326,
+          "height": 17,
+          "caption": "Choose source files"
+        },
+        {
+          "type": "TextButton",
+          "name": "PickCSV",
+          "left": 12,
+          "top": 61,
+          "width": 154,
+          "height": 27,
+          "caption": "CSV file...",
+          "events": {
+            "Clicked": "CLUISOURCE"
+          },
+          "EventInvoke": 1
+        },
+        {
+          "type": "TextButton",
+          "name": "PickTemplates",
+          "left": 175,
+          "top": 61,
+          "width": 154,
+          "height": 27,
+          "caption": "Templates...",
+          "events": {
+            "Clicked": "CLUITEMPLATES"
+          },
+          "EventInvoke": 1
+        },
+        {
+          "type": "Label",
+          "name": "FindLabel",
+          "left": 12,
+          "top": 99,
+          "width": 320,
+          "height": 17,
+          "caption": "Find record (ID / Item / Description)"
+        },
+        {
+          "type": "TextBox",
+          "name": "Search",
+          "left": 12,
+          "top": 117,
+          "width": 317,
+          "height": 27,
+          "events": {
+            "EditChanged": "CSVLabels/Palette/Search#OnEditChanged"
+          },
+          "text": ""
+        },
+        {
+          "type": "ListBox",
+          "name": "Records",
+          "left": 12,
+          "top": 149,
+          "width": 317,
+          "height": 145,
+          "events": {
+            "SelChanged": "CSVLabels/Palette/Records#OnSelChanged"
+          }
+        },
+        {
+          "type": "Label",
+          "name": "CurrentRecord",
+          "left": 12,
+          "top": 300,
+          "width": 320,
+          "height": 17,
+          "caption": "Stable ID:"
+        },
+        {
+          "type": "Label",
+          "name": "TemplateLabel",
+          "left": 12,
+          "top": 323,
+          "width": 320,
+          "height": 17,
+          "caption": "Template"
+        },
+        {
+          "type": "ComboBox",
+          "name": "Templates",
+          "left": 12,
+          "top": 342,
+          "width": 317,
+          "height": 28,
+          "events": {
+            "SelChanged": "CSVLabels/Palette/Templates#OnSelChanged"
+          }
+        },
+        {
+          "type": "Label",
+          "name": "PreviewLabel",
+          "left": 12,
+          "top": 377,
+          "width": 320,
+          "height": 17,
+          "caption": "LABEL PREVIEW"
+        },
+        {
+          "type": "TextBox",
+          "name": "Preview",
+          "left": 12,
+          "top": 395,
+          "width": 317,
+          "height": 95,
+          "text": "",
+          "ReadOnly": true,
+          "AutoVScroll": true,
+          "FontSize": 11
+        },
+        {
+          "type": "Label",
+          "name": "LayoutLabel",
+          "left": 12,
+          "top": 497,
+          "width": 320,
+          "height": 17,
+          "caption": "Layout: use {ColumnName} and \\n for new lines"
+        },
+        {
+          "type": "TextBox",
+          "name": "TemplateText",
+          "left": 12,
+          "top": 516,
+          "width": 317,
+          "height": 54,
+          "events": {
+            "EditChanged": "CSVLabels/Palette/TemplateText#OnEditChanged"
+          },
+          "text": "",
+          "AutoVScroll": true
+        },
+        {
+          "type": "Label",
+          "name": "HeightLabel",
+          "left": 12,
+          "top": 578,
+          "width": 55,
+          "height": 17,
+          "caption": "Height"
+        },
+        {
+          "type": "TextBox",
+          "name": "Height",
+          "left": 67,
+          "top": 573,
+          "width": 65,
+          "height": 26,
+          "text": "2.5"
+        },
+        {
+          "type": "Label",
+          "name": "WidthLabel",
+          "left": 141,
+          "top": 578,
+          "width": 70,
+          "height": 17,
+          "caption": "Wrap width"
+        },
+        {
+          "type": "TextBox",
+          "name": "Width",
+          "left": 222,
+          "top": 573,
+          "width": 107,
+          "height": 26,
+          "text": "0"
+        },
+        {
+          "type": "Label",
+          "name": "LayerLabel",
+          "left": 12,
+          "top": 609,
+          "width": 50,
+          "height": 17,
+          "caption": "Layer"
+        },
+        {
+          "type": "TextBox",
+          "name": "Layer",
+          "left": 67,
+          "top": 604,
+          "width": 262,
+          "height": 26,
+          "text": "CSV_LABELS"
+        },
+        {
+          "type": "Label",
+          "name": "ColorLabel",
+          "left": 12,
+          "top": 641,
+          "width": 50,
+          "height": 17,
+          "caption": "Color"
+        },
+        {
+          "type": "TextBox",
+          "name": "Color",
+          "left": 67,
+          "top": 635,
+          "width": 108,
+          "height": 26,
+          "text": "ByLayer"
+        },
+        {
+          "type": "CheckBox",
+          "name": "Border",
+          "left": 185,
+          "top": 638,
+          "width": 67,
+          "height": 27,
+          "caption": "Frame",
+          "Value": 1
+        },
+        {
+          "type": "CheckBox",
+          "name": "Background",
+          "left": 255,
+          "top": 638,
+          "width": 75,
+          "height": 27,
+          "caption": "Mask",
+          "Value": 1
+        },
+        {
+          "type": "TextButton",
+          "name": "SaveTemplate",
+          "left": 12,
+          "top": 672,
+          "width": 155,
+          "height": 30,
+          "caption": "Save template",
+          "events": {
+            "Clicked": "CLUISAVE"
+          },
+          "EventInvoke": 1
+        },
+        {
+          "type": "TextButton",
+          "name": "Reload",
+          "left": 177,
+          "top": 672,
+          "width": 152,
+          "height": 30,
+          "caption": "Reload files",
+          "events": {
+            "Clicked": "CLUIRELOAD"
+          },
+          "EventInvoke": 1
+        },
+        {
+          "type": "TextButton",
+          "name": "Place",
+          "left": 12,
+          "top": 711,
+          "width": 190,
+          "height": 36,
+          "caption": "PLACE LABELS",
+          "events": {
+            "Clicked": "CLUIPLACE"
+          },
+          "EventInvoke": 1
+        },
+        {
+          "type": "TextButton",
+          "name": "Sync",
+          "left": 212,
+          "top": 711,
+          "width": 117,
+          "height": 36,
+          "caption": "Sync all",
+          "events": {
+            "Clicked": "CLUISYNC"
+          },
+          "EventInvoke": 1
+        }
+      ],
+      "events": {
+        "Initialize": "CSVLabels/Palette#OnInitialize"
+      }
+    }
+  ]
+}

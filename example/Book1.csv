@@ -1,0 +1,26 @@
+id,Description,Item,Count,Thickness,Notes
+1,Front panel - leather,A-01,1,3mm,"Lined, Skive 10mm"
+2,Front panel - stiffener,B-01,1,0.5mm,Skive 5mm
+3,Back panel,A-02,1,3mm,"Lined, Skive 10mm"
+4,Back panel - stiffener,B-02,1,0.5mm,Skive 5mm
+5,Bottom panel,A-03,1,1.5mm,Skive 5mm
+6,Bottom panel - lining,A-04,1,0.5mm,
+7,Interior base - board,B-03,2,1mm,
+8,Interior base - leather wrap,A-05,2,0.5mm,
+9,Partition - top trim,A-11,2,,
+10,Partition - leather,A-10,2,1.5mm,Lined
+11,Frame leather wrap,A-12,2,0.8mm,
+12,Misc,M-0,,0.8mm,
+13,Left gusset - leather,A-06,1,1.5mm,Skive 10mm
+14,Left gusset - lining,A-07,1,1.5mm,Skive 10mm
+15,Right gusset - leather,A-08,1,1.5mm,Skive 10mm
+16,Right gusset - lining,A-09,1,1.5mm,Skive 10mm
+17,Handle - stiffener,A-15,2,9mm,Per side
+18,Handle - interface,A-16,1,2mm,
+19,Handle - support,A-17,1,3mm,
+20,Handle - leather wrap,A-18,2,0.8mm,Butt join bottom seam
+21,Interior base - pull tab,A-23,2,2mm,
+22,Front panel pull tab - leather,A-24,1,1.5mm,Lined
+23,Front panel pull tab - stiffener,B-04,1,1mm,
+24,Back panel flap - leather,A-27,1,1mm,"Lined, Skive 5mm"
+25,Back panel flap - stiffener,B-05,1,1mm,
