@@ -1,4 +1,4 @@
-;;; CSVLABEL.lsp  v0.4
+;;; CSVLABEL.lsp  v0.5
 ;;; BricsCAD AutoLISP: CSV-linked framed MTEXT with OpenDCL palette.
 ;;; CSV and labels.ini are selected independently and may live away from this .lsp.
 ;;; Commands: CLABELSOURCE, CLABELTEMPLATES, CLABEL, CLABELSET,
@@ -272,23 +272,33 @@
   (setq s (cl:replace-all s "{" "\\{"))
   (cl:replace-all s "}" "\\}"))
 
-(defun cl:render (tpl row / i n c closing key entry result)
-  ;; Replace {any CSV column} (case insensitive), and literal \\n with MTEXT newline.
+(defun cl:expand-template (tpl row newline escape / i n c closing key entry result content)
+  ;; Expand the same layout for MTEXT and the plain-text preview.
   (setq i 1 n (strlen tpl) result "")
   (while (<= i n)
     (setq c (substr tpl i 1))
     (cond
+      ((and (= (substr tpl i 3) "[i]")
+            (setq closing (vl-string-search "[/i]" tpl (+ i 2))))
+       (setq content (cl:expand-template (substr tpl (+ i 3) (- closing i 2)) row newline escape))
+       (setq result (strcat result (if escape (strcat "{\\fArial|b0|i1;" content "}") content))
+             i (+ closing 5)))
       ((and (= c "\\") (< i n) (= (substr tpl (1+ i) 1) "n"))
-       (setq result (strcat result "\\P") i (+ i 2)))
+       (setq result (strcat result newline) i (+ i 2)))
       ((and (= c "{") (setq closing (vl-string-search "}" tpl i)))
        (setq key (strcase (cl:trim (substr tpl (1+ i) (- closing i)))))
        (setq entry (assoc key row))
        (setq result
          (strcat result
-           (if entry (cl:escape-mtext (cdr entry)) (strcat "[MISSING:" key "]"))))
+           (if entry
+             (if escape (cl:escape-mtext (cdr entry)) (cdr entry))
+             (strcat "[MISSING:" key "]"))))
        (setq i (+ closing 2)))
       (T (setq result (strcat result c) i (1+ i)))))
   result)
+
+(defun cl:render (tpl row)
+  (cl:expand-template tpl row "\\P" T))
 
 (defun cl:entity-data (ename / xdata grp values)
   ;; Returns (record-id template-name). Older v0.1 labels have ID only.
@@ -525,7 +535,7 @@
   (princ))
 
 (regapp cl:*app*)
-(princ "\nCSVLABEL core v0.4 loaded: CLABELSOURCE, CLABELTEMPLATES, CLABEL, CLABELSET, CLABELSYNC, CLABELFORMAT.")
+(princ "\nCSVLABEL core v0.5 loaded: CLABELSOURCE, CLABELTEMPLATES, CLABEL, CLABELSET, CLABELSYNC, CLABELFORMAT.")
 (princ)
 
 ;;; ======================= v0.4 extensions ===============================
@@ -538,7 +548,7 @@
       clui:*shown* nil
       clui:*id* nil
       clui:*template* nil
-      clui:*odcl-path* nil
+      clui:*loaded* nil
       clui:*busy* nil)
 
 (defun cl:read-styles (path / f line s section pos key val result pair props)
@@ -610,27 +620,40 @@
     (setq result (vl-catch-all-apply 'vla-Add (list layers name))))
   (not (vl-catch-all-error-p result)))
 
-(defun cl:style (name cfg / h w layer color border mask pad)
-  ;; Order: height width layer ACI border mask padding.
+(defun cl:style (name cfg / h w layer pad)
+  ;; Keep the style tuple compatible; every label uses the same framed appearance.
   (setq h (cl:positive-real (cl:style-param name "HEIGHT" "") (nth 2 cfg))
         w (cl:nonnegative-real (cl:style-param name "WIDTH" "") (nth 3 cfg))
         layer (cl:layer-name (cl:style-param name "LAYER" "CSV_LABELS"))
-        color (cl:aci-color (cl:style-param name "COLOR" "ByLayer"))
-        border (cl:true-p (cl:style-param name "BORDER" "true"))
-        mask (cl:true-p (cl:style-param name "BACKGROUND" "true"))
         pad (cl:positive-real (cl:style-param name "PADDING" "1.20") 1.20))
-  (list h w layer color border mask pad))
+  (list h w layer 7 T T pad T))
 
 (defun cl:mask-bits (style)
-  (+ (if (nth 4 style) 16 0)
-     (if (nth 5 style) 2 0)))
+  ;; Native MTEXT frame (16) plus a custom background fill (1).
+  17)
+
+(defun cl:contrast-colors (ed enabled / out pair color)
+  ;; Fixed RGB avoids ACI 7 switching between white and black by viewport.
+  ;; Keep entity and background colors in their respective DXF subclasses.
+  (setq color (assoc 62 ed))
+  (foreach pair ed
+    (if (not (member (car pair) '(62 420 421 430 431)))
+      (progn
+        (setq out (cons pair out))
+        (if (equal pair '(100 . "AcDbEntity"))
+          (progn
+            (if color (setq out (cons color out)))
+            (if enabled (setq out (cons '(420 . 16777215) out)))))
+        (if (and enabled (= (car pair) 63))
+          (setq out (cons '(421 . 0) out))))))
+  (reverse out))
 
 (defun cl:make-label (pt content cfg / style ent)
   ;; New MTEXT is anchored at Middle Center (group 71=5).
   (setq style (cl:style cl:*active-template* cfg))
   (if (cl:ensure-layer (nth 2 style))
     (entmakex
-      (append
+      (cl:contrast-colors (append
         (list '(0 . "MTEXT") '(100 . "AcDbEntity")
               (cons 8 (nth 2 style))
               (cons 62 (nth 3 style))
@@ -643,7 +666,7 @@
         (cl:mtext-chunks content)
         (list (cons 90 (cl:mask-bits style))
               '(63 . 7)
-              (cons 45 (nth 6 style)))))
+              (cons 45 (nth 6 style)))) (nth 7 style)))
     nil))
 
 (defun cl:apply-style (ename template cfg / style ed bits)
@@ -661,6 +684,7 @@
       (setq ed (cl:replace-group ed 90 (cl:mask-bits style)))
       (setq ed (cl:replace-group ed 63 7))
       (setq ed (cl:replace-group ed 45 (nth 6 style)))
+      (setq ed (cl:contrast-colors ed (nth 7 style)))
       (if (entmod ed) (progn (entupd ename) T) nil))))
 
 (defun cl:project-data (/ cfg path rows templates ini)
@@ -756,203 +780,283 @@
                   (close out)
                   T)))))))))
 
-(defun clui:plain-text (txt)
-  (setq txt (cl:replace-all txt "\\P" "\n"))
-  (setq txt (cl:replace-all txt "\\{" "{"))
-  (setq txt (cl:replace-all txt "\\}" "}"))
-  (cl:replace-all txt "\\\\" "\\"))
+(defun clui:get (form name property)
+  ;; Named references do not depend on Studio-generated handle variable names.
+  (dcl-Control-GetProperty "CSVLABEL" form name property))
 
-(defun clui:control (name)
-  ;; OpenDCL binds handle symbols for the controls of an active form.
-  (eval (read (strcat "CSVLabels/Palette/" name))))
+(defun clui:put (form name property value)
+  (dcl-Control-SetProperty "CSVLABEL" form name property value))
 
-(defun clui:ctext (name)
-  (dcl-Control-GetText (clui:control name)))
+(defun clui:status (message)
+  (clui:put "Palette" "Status" "Caption" message))
 
-(defun clui:set (name value)
-  ;; OpenDCL Label controls use Caption; TextBox controls use Text.
-  (if (member name '("Status" "CurrentRecord"))
-    (dcl-Control-SetCaption (clui:control name) value)
-    (dcl-Control-SetText (clui:control name) value)))
+(defun clui:template-value (/ text)
+  (setq text (clui:get "Editor" "TemplateText" "Text"))
+  (setq text (cl:replace-all text "\r\n" "\n"))
+  (setq text (cl:replace-all text "\r" "\n"))
+  (cl:replace-all text "\n" "\\n"))
 
-(defun clui:checked (name)
-  (= 1 (dcl-Control-GetProperty (clui:control name) "Value")))
-
-(defun clui:checkbox (name value)
-  (dcl-Control-SetProperty (clui:control name) "Value" (if value 1 0)))
-
-(defun clui:template-value (/ raw)
-  (setq raw (clui:ctext "TemplateText"))
-  ;; Literal backslash-n is the editable multiline delimiter (as in v0.3).
-  raw)
-
-(defun clui:visible-list (search / out id values)
+(defun clui:visible-list (search / out pair values)
   (setq out nil search (strcase (cl:trim search)))
   (foreach pair (cadr clui:*project*)
-    (setq id (car pair)
-          values (mapcar 'cdr (cdr pair)))
+    (setq values (mapcar 'cdr (cdr pair)))
     (if (or (= search "")
-            (vl-some '(lambda (v) (vl-string-search search (strcase v)))
-                     (cons id values)))
-      (setq out (append out (list pair)))))
-  out)
+            (vl-some '(lambda (value) (vl-string-search search (strcase value))) values))
+      (setq out (cons pair out))))
+  (reverse out))
 
-(defun clui:fill-list (search / labels pos n row id)
-  (setq clui:*shown* (clui:visible-list search))
-  (setq labels nil pos nil n 0)
+(defun clui:columns (/ columns header width row)
+  (dcl-Grid-Clear "CSVLABEL" "Palette" "Records")
+  (while (> (dcl-Grid-GetColumnCount "CSVLABEL" "Palette" "Records") 0)
+    (dcl-Grid-DeleteColumn "CSVLABEL" "Palette" "Records" 0))
+  (setq columns nil)
+  (foreach header (mapcar 'car (cdar (cadr clui:*project*)))
+    (setq width (strlen header))
+    (foreach row (cadr clui:*project*)
+      (setq width (max width (strlen (cdr (assoc header (cdr row)))))))
+    (setq width (min 260 (max 64 (+ 24 (* 7 width)))))
+    (setq columns (cons (list header 0 width) columns)))
+  (if columns
+    (progn
+      (dcl-Grid-AddColumns "CSVLABEL" "Palette" "Records" (reverse columns))
+      ;; Style zero is display-only. CSV editing belongs in the source file.
+      (clui:put "Palette" "Records" "ColumnStyleList" (mapcar '(lambda (col) 0) columns)))))
+
+(defun clui:fill-list (search / cells pos n row previous-busy)
+  (setq previous-busy clui:*busy* clui:*busy* T)
+  (setq clui:*shown* (clui:visible-list search) cells nil pos nil n 0)
   (foreach row clui:*shown*
-    (setq id (car row))
-    (if (= id clui:*id*) (setq pos n))
-    (setq labels (append labels
-      (list (strcat id "  |  "
-         (if (assoc "ITEM" (cdr row)) (cdr (assoc "ITEM" (cdr row))) "")
-         "  "
-         (if (assoc "DESCRIPTION" (cdr row)) (cdr (assoc "DESCRIPTION" (cdr row))) "")))))
-    (setq n (1+ n)))
-  (dcl-ListBox-Clear (clui:control "Records"))
-  (if labels (dcl-ListBox-AddList (clui:control "Records") labels))
-  (if (and (null pos) clui:*shown*)
-    (setq pos 0 clui:*id* (caar clui:*shown*)))
-  (if pos (dcl-ListBox-SetCurSel (clui:control "Records") pos))
-  (clui:preview))
-
-(defun clui:load-style (/ cfg name template)
-  (if (and clui:*project* clui:*template*)
+    (if (= (car row) clui:*id*) (setq pos n))
+    (setq cells (cons (mapcar 'cdr (cdr row)) cells) n (1+ n)))
+  (dcl-Grid-Clear "CSVLABEL" "Palette" "Records")
+  (if cells
     (progn
-      (setq cfg (car clui:*project*) name clui:*template*)
-      (setq template (assoc name (caddr clui:*project*)))
-      (clui:set "TemplateText" (if template (cdr template) ""))
-      (clui:set "Height" (cl:style-param name "HEIGHT" (rtos (nth 2 cfg) 2 2)))
-      (clui:set "Width" (cl:style-param name "WIDTH" (rtos (nth 3 cfg) 2 2)))
-      (clui:set "Layer" (cl:style-param name "LAYER" "CSV_LABELS"))
-      (clui:set "Color" (cl:style-param name "COLOR" "ByLayer"))
-      (clui:checkbox "Border" (cl:true-p (cl:style-param name "BORDER" "true")))
-      (clui:checkbox "Background" (cl:true-p (cl:style-param name "BACKGROUND" "true")))
-      (clui:preview))))
+      (dcl-Grid-FillList "CSVLABEL" "Palette" "Records" (reverse cells))
+      (if (null pos) (setq pos 0))
+      (setq clui:*id* (car (nth pos clui:*shown*)))
+      (dcl-Grid-SetCurCell "CSVLABEL" "Palette" "Records" pos -1))
+    (setq clui:*id* nil))
+  (setq clui:*busy* previous-busy)
+  (clui:preview)
+  (clui:status (if clui:*shown* "" "No matching records.")))
 
-(defun clui:preview (/ row content)
-  (if (and clui:*project* clui:*id*)
+(defun clui:preview (/ row template content)
+  (setq row (assoc clui:*id* (cadr clui:*project*))
+        template (assoc clui:*template* (caddr clui:*project*)))
+  (setq content (if (and row template)
+                  (cl:expand-template (cdr template) (cdr row) "\r\n" nil) ""))
+  (clui:put "Palette" "Preview" "Text" content)
+  (clui:preview-colors "Palette")
+  (clui:put "Palette" "CurrentRecord" "Caption"
+    (if row (strcat "ID " (cdr (assoc "ID" (cdr row)))) ""))
+  (clui:put "Palette" "Place" "Enabled" (if (and row template) T nil)))
+
+(defun clui:reload (/ project names default)
+  (setq clui:*busy* T project (cl:project-data) clui:*project* project)
+  (dcl-ComboBox-Clear "CSVLABEL" "Palette" "Templates")
+  (clui:columns)
+  (if project
     (progn
-      (setq row (assoc (strcase clui:*id*) (cadr clui:*project*)))
-      (setq content (if row
-        (clui:plain-text (cl:render (clui:template-value) (cdr row)))
-        "Select a record"))
-      (clui:set "Preview" content)
-      (clui:set "CurrentRecord" (strcat "Stable ID: " clui:*id*)))
-    (clui:set "Preview" "Select a record")))
-
-(defun clui:reload (/ proj tpl names default)
-  (setq proj (cl:project-data))
-  (if (not proj)
+      (setq names (mapcar 'car (caddr project))
+            default (if (member clui:*template* names) clui:*template*
+                      (cl:template-name (nth 1 (car project)) (caddr project)))
+            clui:*template* default)
+      (dcl-ComboBox-AddList "CSVLABEL" "Palette" "Templates" names)
+      (dcl-ComboBox-SetCurSel "CSVLABEL" "Palette" "Templates" (vl-position default names))
+      (clui:put "Palette" "EditTemplate" "Enabled" T)
+      (clui:put "Palette" "Sync" "Enabled" T)
+      (clui:fill-list (clui:get "Palette" "Search" "Text")))
     (progn
-      (setq clui:*project* nil)
-      (clui:set "Status" "Choose CSV and template files")
-      (clui:set "Preview" "No project data"))
-    (progn
-      (setq clui:*project* proj)
-      (clui:set "Status" (strcat (itoa (length (cadr proj)))
-                                  " records  |  " (itoa (length (caddr proj))) " templates"))
-      (setq names (mapcar 'car (caddr proj)))
-      (dcl-ComboBox-Clear (clui:control "Templates"))
-      (dcl-ComboBox-AddList (clui:control "Templates") names)
-      (setq default (if (and clui:*template* (member clui:*template* names))
-                      clui:*template* (cl:template-name (nth 1 (car proj)) (caddr proj))))
-      (setq clui:*template* default)
-      (dcl-ComboBox-SetCurSel (clui:control "Templates")
-                              (vl-position default names))
-      (clui:load-style)
-      (clui:fill-list (clui:ctext "Search")))))
+      (setq clui:*id* nil clui:*shown* nil clui:*template* nil)
+      (clui:put "Palette" "EditTemplate" "Enabled" nil)
+      (clui:put "Palette" "Sync" "Enabled" nil)
+      (clui:preview)
+      (clui:status "Choose a CSV file and templates file.")))
+  (setq clui:*busy* nil))
 
-(defun clui:save-current (/ cfg ini tpl updates h w)
-  (if (not (and clui:*project* clui:*template*))
-    (progn (princ "\nCSVLABEL: No active template.") nil)
-    (progn
-      (setq h (clui:ctext "Height") w (clui:ctext "Width")
-            tpl (clui:template-value))
-      (cond
-        ((= (cl:trim tpl) "") (princ "\nCSVLABEL: Template cannot be blank.") nil)
-        ((null (cl:positive-real h nil))
-         (princ "\nCSVLABEL: Height must be positive.") nil)
-        ((null (cl:nonnegative-real w nil))
-         (princ "\nCSVLABEL: Width must be nonnegative.") nil)
-        (T
-         (setq cfg (car clui:*project*)
-               ini (cl:template-path cfg)
-               updates
-                 (list (cons "TEMPLATE" tpl)
-                       (cons "HEIGHT" h)
-                       (cons "WIDTH" w)
-                       (cons "LAYER" (cl:layer-name (clui:ctext "Layer")))
-                       (cons "COLOR" (clui:ctext "Color"))
-                       (cons "BORDER" (if (clui:checked "Border") "true" "false"))
-                       (cons "BACKGROUND" (if (clui:checked "Background") "true" "false"))))
-         (if (cl:save-template-entries ini clui:*template* updates)
-           (progn
-             (setq clui:*project* (cl:project-data))
-             (clui:set "Status" (strcat "Saved: " clui:*template*))
-             T)
-           (progn (princ "\nCSVLABEL: Could not save labels.ini.") nil)))))))
+(defun clui:preview-colors (form)
+  (clui:put form "Preview" "BackColor" 0)
+  (clui:put form "Preview" "ForeColor" 16777215))
 
-(defun clui:palette-active-p ()
-  (and (boundp 'CSVLabels/Palette)
-       (dcl-Form-IsActive CSVLabels/Palette)))
+(defun clui:editor-preview (/ row)
+  (setq row (assoc clui:*id* (cadr clui:*project*)))
+  (clui:put "Editor" "Preview" "Text"
+    (if row (cl:expand-template (clui:template-value) (cdr row) "\r\n" nil) ""))
+  (clui:preview-colors "Editor"))
 
-(defun c:CSVLABEL (/ path loaded)
-  ;; Only one discoverable command required. Older CLABEL... commands remain.
-  ;; Call _OPENDCL unconditionally: the runtime handles an already loaded copy.
-  (vl-catch-all-apply 'vl-cmdf (list "_OPENDCL"))
-  (if (not clui:*odcl-path*)
-    (setq clui:*odcl-path*
-      (if (setq path (findfile "CSVLABEL.odcl")) path
-          (getfiled "Select compiled CSVLABEL.odcl" "" "odcl" 0))))
-  (cond
-    ((not clui:*odcl-path*)
-     (princ "\nCSVLABEL: Palette file not selected."))
-    ((clui:palette-active-p)
-     (princ "\nCSVLABEL: Palette is already open."))
-    (T
-     (setq loaded (vl-catch-all-apply 'dcl-Project-Load
-                   (list clui:*odcl-path* T)))
-     (if (or (vl-catch-all-error-p loaded) (not loaded))
-       (princ "\nCSVLABEL: OpenDCL Runtime unavailable or palette failed to load. See README.")
-       (dcl-Form-Show CSVLabels/Palette))))
+(defun c:CLUIEDITORINIT (/ cfg name layer layers entry fields)
+  (setq clui:*busy* T cfg (car clui:*project*) name clui:*template*)
+  (dcl-Control-SetTitleBarText "CSVLABEL" "Editor" (strcat "Edit template: " name))
+  (clui:put "Editor" "TemplateText" "Text"
+    (cl:replace-all (cdr (assoc name (caddr clui:*project*))) "\\n" "\r\n"))
+  (clui:put "Editor" "Height" "Text" (cl:style-param name "HEIGHT" (rtos (nth 2 cfg) 2 4)))
+  (clui:put "Editor" "Width" "Text" (cl:style-param name "WIDTH" (rtos (nth 3 cfg) 2 4)))
+  (setq layer (cl:style-param name "LAYER" "CSV_LABELS") layers nil entry (tblnext "LAYER" T))
+  (while entry
+    (if (not (vl-string-search "|" (cdr (assoc 2 entry))))
+      (setq layers (cons (cdr (assoc 2 entry)) layers)))
+    (setq entry (tblnext "LAYER")))
+  (if (not (member layer layers)) (setq layers (cons layer layers)))
+  (dcl-ComboBox-AddList "CSVLABEL" "Editor" "Layer" (acad_strlsort layers))
+  (clui:put "Editor" "Layer" "Text" layer)
+  (setq fields (mapcar 'car (cdar (cadr clui:*project*))))
+  (dcl-ComboBox-AddList "CSVLABEL" "Editor" "Fields" fields)
+  (if fields (dcl-ComboBox-SetCurSel "CSVLABEL" "Editor" "Fields" 0))
+  (clui:put "Editor" "Status" "Caption" "")
+  (setq clui:*busy* nil)
+  (clui:editor-preview)
   (princ))
 
-;;; OpenDCL palette event handlers. Names MUST match CSVLABEL.odcl.json events.
+(defun c:CLUIINSERT (/ index field)
+  (setq index (dcl-ComboBox-GetCurSel "CSVLABEL" "Editor" "Fields"))
+  (if (and index (>= index 0))
+    (progn
+      (setq field (nth index (mapcar 'car (cdar (cadr clui:*project*)))))
+      (dcl-TextBox-ReplaceSel "CSVLABEL" "Editor" "TemplateText" (strcat "{" field "}"))
+      (clui:editor-preview)
+      (dcl-Control-SetFocus "CSVLABEL" "Editor" "TemplateText")))
+  (princ))
 
-(defun c:CSVLabels/Palette#OnInitialize ()
-  (clui:set "Search" "")
+(defun clui:save-current (/ cfg ini template updates height width layer message)
+  (setq height (clui:get "Editor" "Height" "Text")
+        width (clui:get "Editor" "Width" "Text")
+        layer (cl:trim (clui:get "Editor" "Layer" "Text"))
+        template (clui:template-value))
+  (setq message
+    (cond
+      ((= (cl:trim template) "") "Enter a text layout.")
+      ((null (cl:positive-real height nil)) "Height must be greater than zero.")
+      ((null (cl:nonnegative-real width nil)) "Wrap width must be zero or greater.")
+      ((or (= layer "") (not (snvalid layer)) (vl-string-search "|" layer)) "Choose a valid layer name.")
+      (T nil)))
+  (if message
+    (progn (clui:put "Editor" "Status" "Caption" message) nil)
+    (progn
+      (setq cfg (car clui:*project*) ini (cl:template-path cfg)
+            updates (list (cons "TEMPLATE" template) (cons "HEIGHT" height) (cons "WIDTH" width)
+              (cons "LAYER" layer)))
+      (if (cl:save-template-entries ini clui:*template* updates)
+        T
+        (progn (clui:put "Editor" "Status" "Caption" "Could not save the templates file.") nil)))))
+
+(defun c:CLUISAVE ()
+  (if (setq clui:*saved* (clui:save-current))
+    (dcl-Form-Close "CSVLABEL" "Editor" 1))
+  (princ))
+
+(defun c:CLUIEDITORCLOSE (reason)
+  ;; Enter accepts the dialog too; validate and save before it closes.
+  (if (and (= reason 0) (not clui:*saved*))
+    (not (setq clui:*saved* (clui:save-current)))
+    nil))
+
+(defun c:CLUICANCEL ()
+  (dcl-Form-Close "CSVLABEL" "Editor" 2)
+  (princ))
+
+(defun clui:palette-active-p ()
+  (and clui:*loaded* (dcl-Form-IsActive "CSVLABEL" "Palette")))
+
+(defun cl:home (/ file found)
+  (cond
+    ((and cl:*home* (findfile (strcat cl:*home* "/CSVLABEL.lsp"))) cl:*home*)
+    ((setq file (findfile "CSVLABEL.lsp")) (vl-filename-directory file))
+    (T
+      (foreach file (vl-list-loaded-lisp)
+        (if (= (strcase (vl-filename-base file)) "CSVLABEL")
+          (setq found (vl-filename-directory file))))
+      found)))
+
+(defun cl:toolbar (/ home groups group bars bar item candidate bitmap macro old index)
+  (setq home (cl:home))
+  (if home
+    (progn
+      (setq cl:*home* home
+            groups (vla-get-MenuGroups (vlax-get-acad-object))
+            group (vla-Item groups 0) bars (vla-get-Toolbars group)
+            bar (vl-catch-all-apply 'vla-Item (list bars "Access")))
+      (if (vl-catch-all-error-p bar)
+        (setq bar (vla-Item bars "Standard")))
+      (setq macro (strcat "^C^C(if (not c:CSVLABEL) (load "
+        (vl-prin1-to-string (strcat home "/CSVLABEL.lsp")) "));CSVLABEL;"))
+      (vlax-for candidate bar
+        (if (= (vla-get-Name candidate) "CSV Labels") (setq item candidate)))
+      (if item
+        (vla-put-Macro item macro)
+        (setq item (vla-AddToolbarButton bar (vla-get-Count bar)
+          "CSV Labels" "Find a CSV record and place a label" macro)))
+      (setq bitmap (findfile (strcat home "/CSVLABEL.bmp")))
+      (if bitmap (vla-SetBitmaps item bitmap bitmap))
+      (vla-put-Visible bar :vlax-true)
+      ;; Remove only our old button; preserve anything added to its toolbar.
+      (setq old (vl-catch-all-apply 'vla-Item (list bars "CSV Labels")))
+      (if (not (vl-catch-all-error-p old))
+        (progn
+          (setq index (1- (vla-get-Count old)))
+          (while (>= index 0)
+            (setq candidate (vla-Item old index))
+            (if (= (vla-get-Name candidate) "CSV Labels") (vla-Delete candidate))
+            (setq index (1- index)))
+          (if (= (vla-get-Count old) 0) (vla-Delete old))))
+      T)))
+
+(defun c:CSVLABELTOOLBAR (/ result)
+  (setq result (vl-catch-all-apply 'cl:toolbar nil))
+  (cond
+    ((vl-catch-all-error-p result)
+      (princ (strcat "\nCSVLABEL: Could not create toolbar: " (vl-catch-all-error-message result))))
+    ((not result) (princ "\nCSVLABEL: Add the application folder to the support path, then run CSVLABELTOOLBAR.")))
+  (princ))
+
+(defun c:CSVLABEL (/ home path loaded)
+  (vl-catch-all-apply 'vl-cmdf (list "_OPENDCL"))
+  (if (not (clui:palette-active-p))
+    (progn
+      (setq home (cl:home) path (if home (findfile (strcat home "/CSVLABEL.odcl")) nil))
+      (if (not path) (setq path (findfile "CSVLABEL.odcl")))
+      (if (not path) (setq path (getfiled "Select CSVLABEL.odcl" "" "odcl" 0)))
+      (if path
+        (progn
+          (setq loaded (vl-catch-all-apply 'dcl-Project-Load (list path T "CSVLABEL")))
+          (if (or (vl-catch-all-error-p loaded) (not loaded))
+            (princ "\nCSVLABEL: Could not load the palette. Check the OpenDCL Runtime.")
+            (progn (setq clui:*loaded* T) (dcl-Form-Show "CSVLABEL" "Palette")))))))
+  (princ))
+
+(defun c:CLUIINIT ()
+  (setq clui:*busy* T)
+  (clui:put "Palette" "Search" "Text" "")
   (clui:reload)
   (princ))
 
-(defun c:CSVLabels/Palette/Search#OnEditChanged (newText)
-  (if clui:*project* (clui:fill-list newText))
+(defun c:CLUISEARCH (text)
+  (if (and clui:*project* (not clui:*busy*)) (clui:fill-list text))
   (princ))
 
-(defun c:CSVLabels/Palette/Records#OnSelChanged (idx value)
-  (if (and (numberp idx) (>= idx 0) (< idx (length clui:*shown*)))
-    (progn (setq clui:*id* (car (nth idx clui:*shown*)))
-           (clui:preview)))
+(defun c:CLUISELECT (row column)
+  (if (and (not clui:*busy*) (numberp row) (>= row 0) (< row (length clui:*shown*)))
+    (progn (setq clui:*id* (car (nth row clui:*shown*))) (clui:preview)))
   (princ))
 
-(defun c:CSVLabels/Palette/Templates#OnSelChanged (idx value)
-  (if (and (numberp idx) (>= idx 0)
-           (< idx (length (caddr clui:*project*))))
-    (progn (setq clui:*template* (car (nth idx (caddr clui:*project*))))
-           (clui:load-style)))
+(defun c:CLUITEMPLATE (index value)
+  (if (and (not clui:*busy*) (numberp index) (>= index 0)
+           (< index (length (caddr clui:*project*))))
+    (progn
+      (setq clui:*template* (car (nth index (caddr clui:*project*))))
+      (clui:preview)))
   (princ))
 
-(defun c:CSVLabels/Palette/TemplateText#OnEditChanged (newText)
-  (clui:preview)
+(defun c:CLUIEDITTEXT (text)
+  (if (not clui:*busy*) (clui:editor-preview))
   (princ))
 
-(defun c:CSVLabels/Palette/Height#OnEditChanged (newText) (princ))
-(defun c:CSVLabels/Palette/Width#OnEditChanged (newText) (princ))
-(defun c:CSVLabels/Palette/Color#OnEditChanged (newText) (princ))
-(defun c:CSVLabels/Palette/Layer#OnEditChanged (newText) (princ))
-
-(defun c:CLUISAVE ()
-  (clui:save-current)
+(defun c:CLUIEDIT (/ result)
+  (if clui:*template*
+    (progn
+      (setq clui:*saved* nil)
+      (setq result (dcl-Form-Show "CSVLABEL" "Editor"))
+      (if clui:*saved*
+        (progn (clui:reload) (clui:status "Template saved. Sync labels to update the drawing.")))))
   (princ))
 
 (defun c:CLUISOURCE ()
@@ -974,36 +1078,28 @@
   (if (clui:palette-active-p) (clui:reload))
   (princ))
 
-(defun c:CLUIPLACE (/ proj cfg rows templates row tpl pt en id name count keep-going)
-  ;; Triggered by an OpenDCL button with EventInvoke=AllowCommand (1),
-  ;; so point selection and database edits occur in document command context.
-  (if (and clui:*id* clui:*template* (clui:save-current))
+(defun c:CLUIPLACE (/ project cfg row template point entity id name)
+  ;; Placement reads saved templates; only the editor writes the INI file.
+  (if (and clui:*id* clui:*template*)
     (progn
-      (setq proj (cl:project-data)
-            cfg (car proj) rows (cadr proj) templates (caddr proj)
-            id clui:*id* name clui:*template*
-            row (assoc (strcase id) rows)
-            tpl (assoc name templates)
-            count 0)
-      (if (and row tpl)
+      (setq id clui:*id* name clui:*template* project (cl:project-data)
+            cfg (car project) row (assoc id (cadr project)) template (assoc name (caddr project)))
+      (if (and row template)
         (progn
-          (setq cl:*active-template* name)
-          (princ "\nCSVLABEL: Click to place; press Enter or Esc when finished.")
-          ;; Catch Esc, allowing normal CAD cancellation without unloading UI.
-          (setq keep-going T)
-          (while keep-going
-            (setq pt (vl-catch-all-apply 'getpoint
-                       (list "\nLabel center [Enter to finish]: ")))
-            (if (or (null pt) (vl-catch-all-error-p pt))
-              (setq keep-going nil)
-              (progn
-                (setq en (cl:make-label pt (cl:render (cdr tpl) (cdr row)) cfg))
-                (if (and en (cl:set-entity-data en id name))
-                  (setq count (1+ count))
-                  (if en (entdel en))))))
-          (princ (strcat "\nCSVLABEL: Placed " (itoa count) " labels.")))
-        (princ "\nCSVLABEL: Missing ID or template. Reload palette."))))
+          (setq cl:*active-template* name
+                point (vl-catch-all-apply 'getpoint (list "\nLabel center: ")))
+          (if (and point (not (vl-catch-all-error-p point)))
+            (progn
+              (setq entity (cl:make-label point (cl:render (cdr template) (cdr row)) cfg))
+              (if (and entity (cl:set-entity-data entity id name))
+                (progn
+                  (cl:put-config (list (car cfg) name (nth 2 cfg) (nth 3 cfg) (nth 4 cfg)))
+                  (clui:status (strcat "Placed label for ID " id ".")))
+                (progn
+                  (if entity (entdel entity))
+                  (clui:status "Could not create the label."))))))
+        (clui:status "Record or template changed. Reload the files."))))
   (princ))
 
-(princ "\nCSVLABEL v0.4 loaded. Run CSVLABEL for dockable palette (OpenDCL required).")
+(princ "\nCSVLABEL loaded. Run CSVLABEL to open the interface.")
 (princ)
